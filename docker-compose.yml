@@ -6,3 +6,23 @@ services:
     ports:
       - "8081:80"
     restart: unless-stopped
+
+  api:
+    build: ./api
+    image: devsecops-api
+    container_name: devsecops-api
+    ports:
+      - "4000:4000"
+    restart: unless-stopped
+
+  frontend:
+    build: ./devsecops-portfolio
+    image: devsecops-portfolio
+    container_name: devsecops-portfolio
+    environment:
+      - API_URL=http://api:4000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    restart: unless-stopped
