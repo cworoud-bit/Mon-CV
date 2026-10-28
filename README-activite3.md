@@ -16,7 +16,7 @@
 │       ├── profile.js
 │       ├── projects.js
 │       └── skills.js
-├── portfolio/
+├── devsecops-portfolio/
 │   ├── Dockerfile
 │   ├── .dockerignore
 │   ├── .env.example
@@ -172,7 +172,7 @@ npm install express cors
 npm start
 ```
 
-`package.json` contient `"scripts": { "start": "node server.js" }`. L'API est indépendante du frontend et écoute sur le port 3001.
+`package.json` contient `"scripts": { "start": "node server.js" }`. L'API est indépendante du frontend et écoute sur le port 4000.
 
 `api/server.js` :
 
@@ -184,7 +184,7 @@ const projects = require("./data/projects");
 const skills = require("./data/skills");
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 4000;
 
 app.use(cors());
 
@@ -203,7 +203,7 @@ app.listen(PORT, "0.0.0.0", () => console.log(`API démarrée sur le port ${PORT
 ### 30. Route `GET /api/health`
 
 ```bash
-curl http://localhost:3001/api/health
+curl http://localhost:4000/api/health
 ```
 
 ![Health](screenshots/api-health.png)
@@ -223,7 +223,7 @@ module.exports = {
 ```
 
 ```bash
-curl http://localhost:3001/api/profile
+curl http://localhost:4000/api/profile
 ```
 
 ![Profile](screenshots/api-profile.png)
@@ -240,7 +240,7 @@ module.exports = [
 ```
 
 ```bash
-curl http://localhost:3001/api/projects
+curl http://localhost:4000/api/projects
 ```
 
 ![Projects](screenshots/api-projects.png)
@@ -258,7 +258,7 @@ module.exports = [
 ```
 
 ```bash
-curl http://localhost:3001/api/skills
+curl http://localhost:4000/api/skills
 ```
 
 ![Skills](screenshots/api-skills.png)
@@ -267,38 +267,49 @@ curl http://localhost:3001/api/skills
 
 Le frontend ne lit plus de données locales. Un Server Component Next.js appelle l'API Express via `fetch`. L'option `cache: "no-store"` force la requête à l'exécution et non au build, ce qui est nécessaire en Docker car l'API n'existe pas pendant le build du frontend.
 
-`portfolio/lib/api.js` :
+`devsecops-portfolio/lib/api.js` :
 
 ```js
-const API_URL = process.env.API_URL || "http://localhost:3001";
+import { connection } from "next/server";
 
-export async function getProjects() {
-  const res = await fetch(`${API_URL}/api/projects`, { cache: "no-store" });
-  if (!res.ok) throw new Error("Impossible de charger les projets");
+async function get(path) {
+  await connection();
+  const base = process.env.API_URL;
+  if (!base) throw new Error("La variable d'environnement API_URL n'est pas définie");
+  const res = await fetch(`${base}${path}`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`Erreur API ${res.status} sur ${path}`);
   return res.json();
 }
 
-export async function getSkills() {
-  const res = await fetch(`${API_URL}/api/skills`, { cache: "no-store" });
-  if (!res.ok) throw new Error("Impossible de charger les compétences");
-  return res.json();
-}
+export const getProjects = () => get("/api/projects");
+export const getSkills = () => get("/api/skills");
 ```
 
-`portfolio/app/page.js` :
+`devsecops-portfolio/app/page.js` :
 
 ```jsx
-import { getProjects, getSkills } from "@/lib/api";
+import { Suspense } from "react";
+import Header from "../components/Header";
+import About from "../components/About";
+import Skills from "../components/Skills";
+import Projects from "../components/Projects";
+import Contact from "../components/Contact";
+import Footer from "../components/Footer";
 
-export default async function Home() {
-  const [projects, skills] = await Promise.all([getProjects(), getSkills()]);
+export default function Home() {
   return (
-    <main>
-      <h2>Projets</h2>
-      <ul>{projects.map(p => <li key={p.id}><strong>{p.title}</strong> : {p.description}</li>)}</ul>
-      <h2>Compétences</h2>
-      <ul>{skills.map(s => <li key={s.id}>{s.name} ({s.level})</li>)}</ul>
-    </main>
+    <>
+      <Header />
+      <About />
+      <Suspense fallback={<p>Chargement des compétences…</p>}>
+        <Skills />
+      </Suspense>
+      <Suspense fallback={<p>Chargement des projets…</p>}>
+        <Projects />
+      </Suspense>
+      <Contact />
+      <Footer />
+    </>
   );
 }
 ```
@@ -317,16 +328,16 @@ Même principe avec `getSkills()` et la route `/api/skills`.
 
 ### 36. Variable `API_URL`
 
-Le frontend lit l'URL de l'API via `process.env.API_URL` (en local : `portfolio/.env.local`, non commité).
+Le frontend lit l'URL de l'API via `process.env.API_URL` (en local : `devsecops-portfolio/.env.local`, non commité).
 
 **Pourquoi ne pas coder l'URL en dur ?**
-L'URL de l'API change selon l'environnement : `http://localhost:3001` en développement, `http://api:3001` dans Docker Compose, un domaine HTTPS en production. La coder en dur obligerait à modifier le code et à reconstruire l'image à chaque changement. Avec une variable d'environnement, la même image fonctionne partout et la configuration reste séparée du code.
+L'URL de l'API change selon l'environnement : `http://localhost:4000` en développement, `http://api:4000` dans Docker Compose, un domaine HTTPS en production. La coder en dur obligerait à modifier le code et à reconstruire l'image à chaque changement. Avec une variable d'environnement, la même image fonctionne partout et la configuration reste séparée du code.
 
 ### 37. Fichier `.env.example`
 
 ```env
 # URL de l'API Express (aucun secret ici)
-API_URL=http://localhost:3001
+API_URL=http://localhost:4000
 ```
 
 Le `.gitignore` ignore `.env*` sauf `.env.example`.
@@ -343,13 +354,13 @@ Le `.gitignore` ignore `.env*` sauf `.env.example`.
 module.exports = { output: "standalone" };
 ```
 
-`portfolio/Dockerfile` :
+`devsecops-portfolio/Dockerfile` :
 
 ```dockerfile
 FROM node:20-alpine AS deps
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm npm ci --fetch-timeout=600000 --fetch-retries=5 --fetch-retry-maxtimeout=120000
 
 FROM node:20-alpine AS builder
 WORKDIR /app
@@ -380,11 +391,12 @@ CMD ["node", "server.js"]
 FROM node:20-alpine
 WORKDIR /app
 ENV NODE_ENV=production
+ENV PORT=4000
 COPY package*.json ./
 RUN npm ci --omit=dev
 COPY . .
 USER node
-EXPOSE 3001
+EXPOSE 4000
 CMD ["node", "server.js"]
 ```
 
@@ -393,51 +405,84 @@ CMD ["node", "server.js"]
 ### 40. Construction des images
 
 ```bash
-docker build -t devsecops-portfolio ./portfolio
-docker build -t devsecops-api ./api
+docker build --network=host -t devsecops-portfolio ./devsecops-portfolio
+docker build --network=host -t devsecops-api ./api
 docker images | grep devsecops
+```
+
+`--network=host` a été utilisé car le réseau lent des conteneurs provoquait des timeouts (`EIDLETIMEOUT`) lors de `npm ci`. Les images ont ensuite été transférées vers la VM `worker2` (où Docker a été installé avec Ansible) :
+
+```bash
+docker save devsecops-portfolio | ssh wrida@192.168.220.169 docker load
+docker save devsecops-api | ssh wrida@192.168.220.169 docker load
 ```
 
 ![docker images](screenshots/40-docker-images.png)
 
 ### 41. Docker Compose
 
-`docker-compose.yml` :
+`docker-compose.yml` (le service `portfolio` du CV statique existant est conservé) :
 
 ```yaml
 services:
+  portfolio:
+    build: .
+    image: cv-docker
+    container_name: cv-portfolio
+    ports:
+      - "8081:80"
+    restart: unless-stopped
+
   api:
-    image: devsecops-api
     build: ./api
+    image: devsecops-api
     container_name: devsecops-api
     ports:
-      - "3001:3001"
+      - "4000:4000"
     restart: unless-stopped
 
   frontend:
+    build: ./devsecops-portfolio
     image: devsecops-portfolio
-    build: ./portfolio
     container_name: devsecops-portfolio
+    environment:
+      - API_URL=http://api:4000
     ports:
       - "3000:3000"
-    environment:
-      - API_URL=http://api:3001
     depends_on:
       - api
     restart: unless-stopped
 ```
 
 ```bash
-docker compose up -d --build
+docker compose up -d --no-build api frontend
 docker compose ps
+```
+
+Résultat :
+
+```
+NAME                  IMAGE                 COMMAND                  SERVICE    STATUS         PORTS
+devsecops-api         devsecops-api         "docker-entrypoint.s…"   api        Up 2 seconds   0.0.0.0:4000->4000/tcp
+devsecops-portfolio   devsecops-portfolio   "docker-entrypoint.s…"   frontend   Up 1 second    0.0.0.0:3000->3000/tcp
 ```
 
 ![docker compose ps](screenshots/41-compose-ps.png)
 
 ### 42. Communication frontend / API via le réseau Compose
 
-Docker Compose crée un réseau par défaut où chaque service est joignable par son nom DNS. Le frontend appelle donc l'API avec `http://api:3001` (valeur de `API_URL`). L'appel est fait côté serveur par Next.js, il passe donc bien par le réseau Docker.
+Docker Compose crée un réseau par défaut (`mon-cv_default`) où chaque service est joignable par son nom DNS. Le frontend appelle donc l'API avec `http://api:4000` (valeur de `API_URL`). L'appel est fait côté serveur par Next.js, il passe donc bien par le réseau Docker.
 
-Preuve : après modification d'une valeur dans `api/data/skills.js` puis `docker compose up -d --build api`, le rechargement de `http://localhost:3000` affiche la nouvelle donnée sans toucher au frontend.
+Preuve depuis le conteneur du frontend :
+
+```bash
+docker compose exec frontend wget -qO- http://api:4000/api/health
+```
+
+```json
+{"status":"ok","service":"devsecops-api","uptime":215.98,"timestamp":"2026-10-28T22:15:18.955Z"}
+```
+
+Le Portfolio (`http://192.168.220.169:3000`) affiche les compétences et projets fournis par l'API :
 
 ![Portfolio avec données de l'API](screenshots/42-portfolio-api.png)
