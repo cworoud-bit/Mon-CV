@@ -1,20 +1,13 @@
-import { projects as localProjects } from "../data/projects";
-import { skills as localSkills } from "../data/skills";
+import { connection } from "next/server";
 
-// URL lue dans l'environnement (jamais écrite en dur dans le code)
-const API_URL = process.env.API_URL;
-
-async function fetchFromApi(path, fallback) {
-  if (!API_URL) return fallback;
-  try {
-    const res = await fetch(`${API_URL}${path}`, { cache: "no-store" });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.json();
-  } catch (err) {
-    console.error(`API indisponible (${path}) :`, err.message);
-    return fallback; // données locales si l'API ne répond pas
-  }
+async function get(path) {
+  await connection();
+  const base = process.env.API_URL;
+  if (!base) throw new Error("La variable d'environnement API_URL n'est pas définie");
+  const res = await fetch(`${base}${path}`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`Erreur API ${res.status} sur ${path}`);
+  return res.json();
 }
 
-export const getProjects = () => fetchFromApi("/api/projects", localProjects);
-export const getSkills = () => fetchFromApi("/api/skills", localSkills);
+export const getProjects = () => get("/api/projects");
+export const getSkills = () => get("/api/skills");

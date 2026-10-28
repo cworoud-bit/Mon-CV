@@ -3,6 +3,7 @@ const nextConfig = {
   allowedDevOrigins: ['192.168.220.174'],
   /* config options here */
   cacheComponents: true,
+  output: "standalone",
   partialPrefetching: true,
   turbopack: {
     rules: {
