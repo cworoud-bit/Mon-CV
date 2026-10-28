@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import Header from "../components/Header";
 import About from "../components/About";
 import Skills from "../components/Skills";
@@ -10,8 +11,12 @@ export default function Home() {
     <>
       <Header />
       <About />
-      <Skills />
-      <Projects />
+      <Suspense fallback={<p style={{padding:"2rem"}}>Chargement des compétences…</p>}>
+        <Skills />
+      </Suspense>
+      <Suspense fallback={<p style={{padding:"2rem"}}>Chargement des projets…</p>}>
+        <Projects />
+      </Suspense>
       <Contact />
       <Footer />
     </>

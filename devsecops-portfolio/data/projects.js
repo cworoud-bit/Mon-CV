@@ -22,5 +22,11 @@ export const projects = [
     title: "Automatisation avec Vagrant",
     description: "Création reproductible de VM via Vagrantfile (provider Docker).",
     tags: ["Vagrant", "IaC"]
+  },
+  {
+    slug: "ansible-automation",
+    title: "Automatisation avec Ansible",
+    description: "Playbooks pour installer des paquets et Docker sur plusieurs VM.",
+    tags: ["Ansible", "IaC"]
   }
 ];

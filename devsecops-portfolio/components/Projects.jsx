@@ -1,7 +1,8 @@
-import { projects } from "../data/projects";
 import Link from "next/link";
+import { getProjects } from "../lib/api";
 
-export default function Projects() {
+export default async function Projects() {
+  const projects = await getProjects();
   return (
     <section id="projects" style={{padding:"2rem"}}>
       <h2>Projects</h2>

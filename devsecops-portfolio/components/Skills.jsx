@@ -1,6 +1,7 @@
-import { skills } from "../data/skills";
+import { getSkills } from "../lib/api";
 
-export default function Skills() {
+export default async function Skills() {
+  const skills = await getSkills();
   return (
     <section id="skills" style={{padding:"2rem"}}>
       <h2>DevSecOps Skills</h2>
