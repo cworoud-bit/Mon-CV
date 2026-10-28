@@ -1,0 +1,129 @@
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 707B done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/node:20-alpine
+#2 DONE 0.0s
+
+#3 [internal] load .dockerignore
+#3 transferring context: 2B done
+#3 DONE 0.0s
+
+#4 [deps 1/4] FROM docker.io/library/node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293
+#4 resolve docker.io/library/node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293 0.1s done
+#4 DONE 0.1s
+
+#5 [deps 2/4] WORKDIR /app
+#5 CACHED
+
+#6 [runner 3/6] RUN addgroup -S app && adduser -S app -G app
+#6 CACHED
+
+#7 [internal] load build context
+#7 transferring context: 1.97MB 4.2s done
+#7 DONE 4.3s
+
+#8 [deps 3/4] COPY package*.json ./
+#8 CACHED
+
+#9 [deps 4/4] RUN --mount=type=cache,target=/root/.npm npm ci --fetch-timeout=600000 --fetch-retries=5 --fetch-retry-maxtimeout=120000
+#9 63.38 npm warn deprecated eslint@9.39.5: This version is no longer supported. Please see https://eslint.org/version-support for other options.
+#9 318.3 
+#9 318.3 added 359 packages, and audited 360 packages in 5m
+#9 318.3 
+#9 318.3 146 packages are looking for funding
+#9 318.3   run `npm fund` for details
+#9 318.5 
+#9 318.5 2 vulnerabilities (1 high, 1 critical)
+#9 318.5 
+#9 318.5 To address issues that do not require attention, run:
+#9 318.5   npm audit fix
+#9 318.5 
+#9 318.5 To address all issues, run:
+#9 318.5   npm audit fix --force
+#9 318.5 
+#9 318.5 Run `npm audit` for details.
+#9 318.5 npm notice
+#9 318.5 npm notice New major version of npm available! 10.8.2 -> 12.2.1
+#9 318.5 npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+#9 318.5 npm notice To update run: npm install -g npm@12.2.1
+#9 318.5 npm notice
+#9 DONE 319.1s
+
+#10 [builder 3/5] COPY --from=deps /app/node_modules ./node_modules
+#10 DONE 27.2s
+
+#11 [builder 4/5] COPY . .
+#11 DONE 46.5s
+
+#12 [builder 5/5] RUN npm run build
+#12 3.397 
+#12 3.397 > devsecops-portfolio@0.1.0 build
+#12 3.397 > next build
+#12 3.397 
+#12 5.939 ▲ Next.js 16.4.0 (Turbopack)
+#12 5.940 - Environments: .env.local
+#12 6.052 ✓ Running next.config.mjs took 106ms
+#12 6.078 Attention: Next.js now collects completely anonymous telemetry regarding usage.
+#12 6.078 This information is used to shape Next.js' roadmap and prioritize features.
+#12 6.078 You can learn more, including how to opt-out if you'd not like to participate in this anonymous program, by visiting the following URL:
+#12 6.078 https://nextjs.org/telemetry
+#12 6.078 
+#12 6.992 - Cache Components enabled
+#12 6.994 - Partial Prefetching enabled
+#12 6.996 
+#12 7.129   Creating an optimized production build ...
+#12 20.86 ✓ Compiled successfully in 13.7s
+#12 20.93   Running TypeScript ...
+#12 20.97   Finished TypeScript in 26ms ...
+#12 21.02   Collecting page data using 1 worker ...
+#12 24.18   Generating static pages using 1 worker (0/11) ...
+#12 25.92   Generating static pages using 1 worker (2/11) 
+#12 26.20   Generating static pages using 1 worker (5/11) 
+#12 26.21   Generating static pages using 1 worker (8/11) 
+#12 26.65 ✓ Generating static pages using 1 worker (11/11) in 2.5s
+#12 26.68   Finalizing page optimization ...
+#12 28.82 
+#12 28.84 Route (app)
+#12 28.84 ┌ ◐ /
+#12 28.84 ├ ○ /_not-found
+#12 28.84 ├ ○ /projects
+#12 28.84 └   /projects/[slug]
+#12 28.84   ├ ◐ /projects/[slug]
+#12 28.84   ├ ○ /projects/infra-ssh
+#12 28.84   ├ ○ /projects/jenkins-cicd
+#12 28.84   └ ◐ [+3 more paths]
+#12 28.84 
+#12 28.84 
+#12 28.84 ○  (Static)             prerendered as static content
+#12 28.84 ◐  (Partial Prerender)  prerendered as static HTML with dynamic server-streamed content
+#12 28.84 
+#12 29.01 npm notice
+#12 29.01 npm notice New major version of npm available! 10.8.2 -> 12.2.1
+#12 29.01 npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+#12 29.01 npm notice To update run: npm install -g npm@12.2.1
+#12 29.01 npm notice
+#12 DONE 29.2s
+
+#13 [runner 4/6] COPY --from=builder /app/public ./public
+#13 DONE 0.2s
+
+#14 [runner 5/6] COPY --from=builder --chown=app:app /app/.next/standalone ./
+#14 DONE 0.8s
+
+#15 [runner 6/6] COPY --from=builder --chown=app:app /app/.next/static ./.next/static
+#15 DONE 0.2s
+
+#16 exporting to image
+#16 exporting layers
+#16 exporting layers 7.9s done
+#16 exporting manifest sha256:ac382d9420786d69946b82d0806f6909c299f1f13d88caf4a7a09153efdcf584 0.0s done
+#16 exporting config sha256:e3a22d7658221792990a0579e327d65cbcb68fe39aad4d3c53510f2fdb488ad1 0.0s done
+#16 exporting attestation manifest sha256:bb831f8c71f5fca3740fcdc147fe28654477af13185574dff03c5f39bf0d26f1 0.0s done
+#16 exporting manifest list sha256:9b419bd9eb5fb1fb6f25c213c78170763729abcf19d548d46743cd9127f1c5c6 0.0s done
+#16 naming to docker.io/library/devsecops-portfolio:latest 0.0s done
+#16 unpacking to docker.io/library/devsecops-portfolio:latest
+#16 unpacking to docker.io/library/devsecops-portfolio:latest 2.2s done
+#16 DONE 10.4s
