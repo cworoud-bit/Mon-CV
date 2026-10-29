@@ -1,0 +1,5 @@
+[servers]
+worker1 ansible_host=192.168.220.168 ansible_user=wrida ansible_python_interpreter=/usr/bin/python3
+
+[docker_vm]
+worker2 ansible_host=192.168.220.169 ansible_user=wrida ansible_python_interpreter=/usr/bin/python3

@@ -1,0 +1,76 @@
+---
+- name: Configurer la VM, installer Docker et déployer le DevSecOps Portfolio
+  hosts: all
+  become: true
+  vars:
+    repo_url: https://github.com/cworoud-bit/Mon-CV.git
+    repo_branch: activite-4
+    app_dir: /opt/devsecops
+
+  tasks:
+    - name: Installer les prérequis
+      ansible.builtin.apt:
+        name: [ca-certificates, curl, gnupg, git]
+        state: present
+        update_cache: true
+
+    - name: Créer le dossier des clés
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: "0755"
+
+    - name: Ajouter la clé GPG Docker
+      ansible.builtin.get_url:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        dest: /etc/apt/keyrings/docker.asc
+        mode: "0644"
+
+    - name: Ajouter le dépôt Docker
+      ansible.builtin.apt_repository:
+        repo: "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        state: present
+        filename: docker
+
+    - name: Installer Docker et le plugin Compose
+      ansible.builtin.apt:
+        name: [docker-ce, docker-ce-cli, containerd.io, docker-compose-plugin]
+        state: present
+        update_cache: true
+
+    - name: Démarrer et activer Docker
+      ansible.builtin.service:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Ajouter l'utilisateur vagrant au groupe docker
+      ansible.builtin.user:
+        name: vagrant
+        groups: docker
+        append: true
+
+    - name: Récupérer le code du projet
+      ansible.builtin.git:
+        repo: "{{ repo_url }}"
+        dest: "{{ app_dir }}"
+        version: "{{ repo_branch }}"
+        force: true
+
+    - name: Construire et démarrer l'API et le frontend
+      ansible.builtin.command: docker compose up -d --build api frontend
+      args:
+        chdir: "{{ app_dir }}"
+      register: compose_result
+      retries: 3
+      delay: 20
+      until: compose_result is succeeded
+
+    - name: Attendre que le Portfolio réponde
+      ansible.builtin.uri:
+        url: http://localhost:3000
+        status_code: 200
+      register: portfolio
+      retries: 12
+      delay: 10
+      until: portfolio.status == 200
