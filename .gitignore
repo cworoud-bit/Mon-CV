@@ -1,2 +1,6 @@
-.vagrant/
+node_modules/
+.env
+.env.local
+*.bak
 *.log
+.vagrant/
