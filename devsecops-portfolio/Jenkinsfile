@@ -21,6 +21,12 @@ pipeline {
             }
         }
 
+        stage('Scan des secrets (Gitleaks)') {
+            steps {
+                sh 'docker run --rm -v "$PWD":/repo zricethezav/gitleaks:latest detect --source /repo --redact --no-banner --verbose'
+            }
+        }
+
         stage('Tests frontend') {
             steps {
                 dir('devsecops-portfolio') {
@@ -35,6 +41,17 @@ pipeline {
                 dir('api') {
                     sh 'npm ci $NPM_FLAGS'
                     sh 'npm test'
+                }
+            }
+        }
+
+        stage('Audit des dépendances (npm audit)') {
+            steps {
+                dir('api') {
+                    sh 'npm audit --omit=dev --audit-level=critical'
+                }
+                dir('devsecops-portfolio') {
+                    sh 'npm audit --omit=dev --audit-level=critical'
                 }
             }
         }
