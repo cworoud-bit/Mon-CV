@@ -39,14 +39,13 @@ const apiLimiter = rateLimit({
 
 const contactLimiter = rateLimit({
   windowMs: 60 * 1000,
-  limit: 5,
+  limit: Number(process.env.CONTACT_RATE_LIMIT) || 5,
   standardHeaders: "draft-7",
   legacyHeaders: false,
   handler: tooMany,
 });
 
 const app = express();
-const messages = []; // remplacé par PostgreSQL au point 54
 
 app.use(helmet());
 app.use(
@@ -69,13 +68,12 @@ app.get("/api/profile", (req, res) => res.json(profile));
 app.get("/api/projects", (req, res) => res.json(projects));
 app.get("/api/skills", (req, res) => res.json(skills));
 
-app.post("/api/contact", contactLimiter, (req, res) => {
+app.post("/api/contact", contactLimiter, async (req, res) => {
   const data = contactSchema.parse(req.body);
-  const entry = { id: messages.length + 1, ...data, createdAt: new Date().toISOString() };
-  messages.push(entry);
+  const prisma = require("./db"); // chargé à la demande (facilite les tests)
+  const entry = await prisma.contactMessage.create({ data });
   res.status(201).json({ status: "ok", message: "Message bien reçu", id: entry.id });
 });
-
 app.use((req, res) => {
   res.status(404).json({
     status: "error",
