@@ -1,28 +1,54 @@
-
 pipeline {
     agent any
+
+    options {
+        timeout(time: 90, unit: 'MINUTES')
+    }
+
+    environment {
+        NPM_FLAGS = '--fetch-timeout=600000 --fetch-retries=5 --fetch-retry-maxtimeout=120000'
+    }
 
     stages {
         stage('Checkout') {
             steps {
-                git branch: 'main',
-                    url: 'https://github.com/cworoud-bit/Ubuntu.git'
+                git branch: 'activite-4',
+                    url: 'https://github.com/cworoud-bit/Mon-CV.git'
+                script {
+                    env.GIT_SHA = sh(script: 'git rev-parse --short=7 HEAD', returnStdout: true).trim()
+                }
+                echo "Commit analysé : ${env.GIT_SHA}"
             }
         }
 
-        stage('Install Dependencies') {
+        stage('Tests frontend') {
             steps {
                 dir('devsecops-portfolio') {
-                    sh 'npm install'
+                    sh 'npm ci $NPM_FLAGS'
+                    sh 'npm test'
                 }
             }
         }
 
-        stage('Build') {
+        stage('Tests API') {
             steps {
-                dir('devsecops-portfolio') {
-                    sh 'npm run build'
+                dir('api') {
+                    sh 'npm ci $NPM_FLAGS'
+                    sh 'npm test'
                 }
+            }
+        }
+
+        stage('Build images Docker') {
+            steps {
+                sh 'docker build --network=host -t devsecops-api:${GIT_SHA} ./api'
+                sh 'docker build --network=host -t devsecops-portfolio:${GIT_SHA} ./devsecops-portfolio'
+            }
+        }
+
+        stage('Images générées') {
+            steps {
+                sh 'docker images | grep -E "REPOSITORY|devsecops" | grep -E "REPOSITORY|${GIT_SHA}"'
             }
         }
     }
