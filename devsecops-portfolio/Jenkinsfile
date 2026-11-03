@@ -2,7 +2,12 @@ pipeline {
     agent any
 
     options {
-        timeout(time: 90, unit: 'MINUTES')
+        timeout(time: 120, unit: 'MINUTES')
+    }
+
+    parameters {
+        string(name: 'BRANCH', defaultValue: 'activite-4',
+               description: 'Branche à analyser (utile pour le test d échec volontaire)')
     }
 
     environment {
@@ -12,7 +17,7 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
-                git branch: 'activite-4',
+                git branch: "${params.BRANCH ?: 'activite-4'}",
                     url: 'https://github.com/cworoud-bit/Mon-CV.git'
                 script {
                     env.GIT_SHA = sh(script: 'git rev-parse --short=7 HEAD', returnStdout: true).trim()
@@ -21,9 +26,25 @@ pipeline {
             }
         }
 
+        // Q64 + Q69 : Gitleaks quitte avec le code 1 si un secret est trouvé
         stage('Scan des secrets (Gitleaks)') {
             steps {
                 sh 'docker run --rm -v "$PWD":/repo zricethezav/gitleaks:latest detect --source /repo --redact --no-banner --verbose'
+            }
+        }
+
+        // Q65 : SAST frontend + backend
+        stage('SAST (Semgrep)') {
+            steps {
+                sh '''
+                    docker run --rm -v "$PWD":/src semgrep/semgrep:latest \
+                      semgrep scan \
+                      --config p/javascript --config p/typescript \
+                      --config p/nodejs --config p/owasp-top-ten \
+                      --severity ERROR --error --metrics=off \
+                      --exclude node_modules --exclude .next \
+                      /src/api /src/devsecops-portfolio
+                '''
             }
         }
 
@@ -45,6 +66,7 @@ pipeline {
             }
         }
 
+        // Q66
         stage('Audit des dépendances (npm audit)') {
             steps {
                 dir('api') {
@@ -56,10 +78,52 @@ pipeline {
             }
         }
 
+        // Q67 : échoue si CVSS >= 9 (critique)
+        stage('OWASP Dependency-Check') {
+            options { timeout(time: 60, unit: 'MINUTES') }
+            steps {
+                sh '''
+                    mkdir -p odc-report && chmod 777 odc-report
+                    docker run --rm \
+                      -v "$PWD":/src \
+                      -v "$PWD/odc-report":/report \
+                      -v odc-data:/usr/share/dependency-check/data \
+                      owasp/dependency-check:latest \
+                      --scan /src/api/package-lock.json \
+                      --scan /src/devsecops-portfolio/package-lock.json \
+                      --format HTML --format JSON --out /report \
+                      --failOnCVSS 9
+                '''
+            }
+        }
+
         stage('Build images Docker') {
             steps {
                 sh 'docker build --network=host -t devsecops-api:${GIT_SHA} ./api'
                 sh 'docker build --network=host -t devsecops-portfolio:${GIT_SHA} ./devsecops-portfolio'
+            }
+        }
+
+        // Q68 + Q69 : rapport HIGH/CRITICAL, puis échec sur CRITICAL
+        stage('Scan des images (Trivy)') {
+            steps {
+                sh '''
+                    for IMG in devsecops-api devsecops-portfolio; do
+                      docker run --rm \
+                        -v /var/run/docker.sock:/var/run/docker.sock \
+                        -v trivy-cache:/root/.cache/ \
+                        aquasec/trivy:latest image --no-progress --timeout 15m \
+                        --severity HIGH,CRITICAL --ignore-unfixed --exit-code 0 \
+                        $IMG:${GIT_SHA}
+
+                      docker run --rm \
+                        -v /var/run/docker.sock:/var/run/docker.sock \
+                        -v trivy-cache:/root/.cache/ \
+                        aquasec/trivy:latest image --no-progress --timeout 15m \
+                        --severity CRITICAL --ignore-unfixed --exit-code 1 \
+                        $IMG:${GIT_SHA}
+                    done
+                '''
             }
         }
 
@@ -68,5 +132,13 @@ pipeline {
                 sh 'docker images | grep -E "REPOSITORY|devsecops" | grep -E "REPOSITORY|${GIT_SHA}"'
             }
         }
+    }
+
+    post {
+        always {
+            archiveArtifacts artifacts: 'odc-report/**', allowEmptyArchive: true
+        }
+        success { echo 'Pipeline réussi : aucun secret ni vulnérabilité critique.' }
+        failure { echo 'Pipeline échoué : secret ou vulnérabilité critique détecté, voir le stage rouge.' }
     }
 }
