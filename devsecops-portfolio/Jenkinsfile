@@ -7,7 +7,7 @@ pipeline {
 
     parameters {
         string(name: 'BRANCH', defaultValue: 'activite-4',
-               description: 'Branche à analyser (utile pour le test d échec volontaire)')
+               description: 'Branche à analyser (utile pour le test d echec volontaire)')
     }
 
     environment {
@@ -26,14 +26,12 @@ pipeline {
             }
         }
 
-        // Q64 + Q69 : Gitleaks quitte avec le code 1 si un secret est trouvé
         stage('Scan des secrets (Gitleaks)') {
             steps {
                 sh 'docker run --rm -v "$PWD":/repo zricethezav/gitleaks:latest detect --source /repo --redact --no-banner --verbose'
             }
         }
 
-        // Q65 : SAST frontend + backend
         stage('SAST (Semgrep)') {
             steps {
                 sh '''
@@ -66,7 +64,6 @@ pipeline {
             }
         }
 
-        // Q66
         stage('Audit des dépendances (npm audit)') {
             steps {
                 dir('api') {
@@ -78,22 +75,24 @@ pipeline {
             }
         }
 
-        // Q67 : échoue si CVSS >= 9 (critique)
         stage('OWASP Dependency-Check') {
             options { timeout(time: 60, unit: 'MINUTES') }
             steps {
-                sh '''
-                    mkdir -p odc-report && chmod 777 odc-report
-                    docker run --rm \
-                      -v "$PWD":/src \
-                      -v "$PWD/odc-report":/report \
-                      -v odc-data:/usr/share/dependency-check/data \
-                      owasp/dependency-check:latest \
-                      --scan /src/api/package-lock.json \
-                      --scan /src/devsecops-portfolio/package-lock.json \
-                      --format HTML --format JSON --out /report \
-                      --failOnCVSS 9
-                '''
+                withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_KEY')]) {
+                    sh '''
+                        mkdir -p odc-report && chmod 777 odc-report
+                        docker run --rm --user root \
+                          -v "$PWD":/src \
+                          -v "$PWD/odc-report":/report \
+                          -v odc-data:/usr/share/dependency-check/data \
+                          owasp/dependency-check:latest \
+                          --scan /src/api/package-lock.json \
+                          --scan /src/devsecops-portfolio/package-lock.json \
+                          --format HTML --format JSON --out /report \
+                          --failOnCVSS 9 \
+                          --nvdApiKey "$NVD_KEY"
+                    '''
+                }
             }
         }
 
@@ -104,7 +103,6 @@ pipeline {
             }
         }
 
-        // Q68 + Q69 : rapport HIGH/CRITICAL, puis échec sur CRITICAL
         stage('Scan des images (Trivy)') {
             steps {
                 sh '''
