@@ -106,20 +106,24 @@ pipeline {
         stage('Scan des images (Trivy)') {
             steps {
                 sh '''
+                    mkdir -p trivy-tmp
+                    trap 'rm -rf trivy-tmp' EXIT
                     for IMG in devsecops-api devsecops-portfolio; do
-                      docker run --rm \
-                        -v /var/run/docker.sock:/var/run/docker.sock \
-                        -v trivy-cache:/root/.cache/ \
-                        aquasec/trivy:latest image --no-progress --timeout 15m \
-                        --severity HIGH,CRITICAL --ignore-unfixed --exit-code 0 \
-                        $IMG:${GIT_SHA}
+                      docker save $IMG:${GIT_SHA} -o trivy-tmp/$IMG.tar
 
                       docker run --rm \
-                        -v /var/run/docker.sock:/var/run/docker.sock \
+                        -v "$PWD/trivy-tmp":/images \
                         -v trivy-cache:/root/.cache/ \
-                        aquasec/trivy:latest image --no-progress --timeout 15m \
-                        --severity CRITICAL --ignore-unfixed --exit-code 1 \
-                        $IMG:${GIT_SHA}
+                        aquasec/trivy:latest image --input /images/$IMG.tar \
+                        --scanners vuln --no-progress --timeout 15m \
+                        --severity HIGH,CRITICAL --ignore-unfixed --exit-code 0
+
+                      docker run --rm \
+                        -v "$PWD/trivy-tmp":/images \
+                        -v trivy-cache:/root/.cache/ \
+                        aquasec/trivy:latest image --input /images/$IMG.tar \
+                        --scanners vuln --no-progress --timeout 15m \
+                        --severity CRITICAL --ignore-unfixed --exit-code 1
                     done
                 '''
             }
