@@ -1,0 +1,31 @@
+---
+- name: Déployer le DevSecOps Portfolio avec Docker Compose
+  hosts: docker_vm
+  become: true
+  vars:
+    repo_url: https://github.com/cworoud-bit/Mon-CV.git
+    repo_branch: activite-4
+    app_dir: /opt/devsecops
+
+  tasks:
+    - name: Installer git
+      ansible.builtin.apt:
+        name: git
+        state: present
+        update_cache: true
+
+    - name: Récupérer le code du projet
+      ansible.builtin.git:
+        repo: "{{ repo_url }}"
+        dest: "{{ app_dir }}"
+        version: "{{ repo_branch }}"
+        force: true
+
+    - name: Construire et démarrer api et frontend
+      community.docker.docker_compose_v2:
+        project_src: "{{ app_dir }}"
+        services:
+          - api
+          - frontend
+        build: always
+        state: present
