@@ -98,3 +98,71 @@ vagrant up
 La VM est détruite puis recréée, et le Portfolio est redéployé automatiquement, sans intervention manuelle, sur `http://localhost:3000`.
 
 ![vagrant destroy puis vagrant up](screenshots/45-vagrant-destroy-up.png)
+
+
+
+
+## Pipeline Jenkins DevSecOps
+
+| Étape | Outil | Rôle |
+|---|---|---|
+| Checkout | Git | Récupère la branche et le SHA court |
+| Scan des secrets | Gitleaks | Échoue si un secret est détecté |
+| SAST | Semgrep | Analyse du code frontend et API |
+| Tests | Node test runner / Vitest | Tests frontend et API |
+| Audit des dépendances | npm audit | Échoue si faille critique |
+| Contrôle des dépendances | OWASP Dependency-Check | Échoue si CVSS ≥ 9 |
+| Build | Docker | Images taguées avec le Git SHA |
+| Scan des images | Trivy | Échoue si faille CRITICAL |
+
+### Q61 : tests automatiques
+Les tests du frontend et de l'API s'exécutent à chaque build.
+
+![Stages Jenkins](screenshots/61-jenkins-tests.png)
+![Tests frontend et API](screenshots/61-tests-frontend-api.png)
+
+### Q62 : construction des images
+![Build des images](screenshots/62-jenkins-build-images.png)
+
+### Q63 : tag Git SHA
+Les images sont taguées avec le SHA court du commit.
+
+![Images taguées](screenshots/63-images-sha.png)
+
+### Q64 : scan des secrets (Gitleaks)
+![Gitleaks](screenshots/64-gitleaks-ok.png)
+
+### Q65 : SAST (Semgrep)
+![Semgrep](screenshots/65-semgrep.png)
+
+### Q66 et Q67 : dépendances
+`npm audit` a détecté une faille critique dans `next` 16.0.0 à 16.4.0, corrigée en 16.4.3.
+
+![Dépendance vulnérable](screenshots/67-dependance-vulnerable.png)
+
+OWASP Dependency-Check a détecté `deepmerge-ts` 7.1.5 (GHSA-ggr8-5vv4-36mx, CVSS 10.0), corrigé en 8.0.0 avec `overrides`.
+
+![Dependency-Check](screenshots/dependency-check-critique.png)
+
+### Q68 : scan des images (Trivy)
+Trivy a détecté `tar` 6.2.1 dans npm (CVE-2026-59873, CRITICAL). Correction : npm retiré de l'image finale.
+
+![Trivy : échec](screenshots/trivy-echec-critical.png)
+![Trivy : réussi](screenshots/68-trivy-ok.png)
+
+### Q69 : le pipeline échoue sur faille critique ou secret
+
+Pipeline réussi :
+
+![Pipeline réussi](screenshots/69-pipeline-reussi.png)
+![Pipeline réussi (vue complète)](screenshots/pipeline-reussi.png)
+
+Pipeline échoué (secret détecté par Gitleaks, sur une branche de test) :
+
+![Pipeline échoué](screenshots/69-pipeline-echoue.png)
+![Échec Gitleaks](screenshots/pipeline-echec-gitleaks.png)
+![Secret détecté](screenshots/gitleaks-secret-detecte.png)
+
+Pipeline échoué (faille critique détectée par Trivy) :
+
+![Échec Trivy](screenshots/pipeline-echec-trivy.png)
