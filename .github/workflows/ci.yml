@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+# Q76 : permissions minimales pour tout le workflow
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Tests (${{ matrix.dir }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dir: [devsecops-portfolio, api]
+    defaults:
+      run:
+        working-directory: ${{ matrix.dir }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ${{ matrix.dir }}/package-lock.json
+      - run: npm ci
+      - run: npm test
+
+  secrets:
+    name: Scan des secrets (Gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - run: |
+          docker run --rm -v "$PWD":/repo zricethezav/gitleaks:latest \
+            detect --source /repo --log-opts="HEAD" --redact --no-banner --verbose
+
+  sast:
+    name: SAST (Semgrep)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: |
+          docker run --rm -v "$PWD":/src semgrep/semgrep:latest \
+            semgrep scan --config p/javascript --config p/typescript \
+            --config p/nodejs --config p/owasp-top-ten \
+            --severity ERROR --error --metrics=off \
+            --exclude node_modules --exclude .next \
+            /src/api /src/devsecops-portfolio
+
+  dependencies:
+    name: Dépendances (npm audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - run: npm audit --omit=dev --audit-level=critical
+        working-directory: api
+      - run: npm audit --omit=dev --audit-level=critical
+        working-directory: devsecops-portfolio
+
+  images:
+    name: Build et scan des images (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    needs: [tests, secrets, sast, dependencies]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: devsecops-api
+            context: ./api
+          - image: devsecops-portfolio
+            context: ./devsecops-portfolio
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Build
+        run: docker build -t ${{ matrix.image }}:${{ github.sha }} ${{ matrix.context }}
+      - name: Scan Trivy (échec si CRITICAL)
+        uses: aquasecurity/trivy-action@38b337fff0a2f984d5be173c99e3f633438167ec # master au 2026-11-11
+        with:
+          image-ref: ${{ matrix.image }}:${{ github.sha }}
+          scanners: vuln
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"

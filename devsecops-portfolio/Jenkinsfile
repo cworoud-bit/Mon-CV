@@ -1,29 +1,146 @@
-
 pipeline {
     agent any
+
+    options {
+        timeout(time: 120, unit: 'MINUTES')
+    }
+
+    parameters {
+        string(name: 'BRANCH', defaultValue: 'activite-4',
+               description: 'Branche à analyser (utile pour le test d echec volontaire)')
+    }
+
+    environment {
+        NPM_FLAGS = '--fetch-timeout=600000 --fetch-retries=5 --fetch-retry-maxtimeout=120000'
+    }
 
     stages {
         stage('Checkout') {
             steps {
-                git branch: 'main',
-                    url: 'https://github.com/cworoud-bit/Ubuntu.git'
+                git branch: "${params.BRANCH ?: 'activite-4'}",
+                    url: 'https://github.com/cworoud-bit/Mon-CV.git'
+                script {
+                    env.GIT_SHA = sh(script: 'git rev-parse --short=7 HEAD', returnStdout: true).trim()
+                }
+                echo "Commit analysé : ${env.GIT_SHA}"
             }
         }
 
-        stage('Install Dependencies') {
+        stage('Scan des secrets (Gitleaks)') {
+            steps {
+                sh 'docker run --rm -v "$PWD":/repo zricethezav/gitleaks:latest detect --source /repo --log-opts="HEAD" --redact --no-banner --verbose'
+            }
+        }
+
+        stage('SAST (Semgrep)') {
+            steps {
+                sh '''
+                    docker run --rm -v "$PWD":/src semgrep/semgrep:latest \
+                      semgrep scan \
+                      --config p/javascript --config p/typescript \
+                      --config p/nodejs --config p/owasp-top-ten \
+                      --severity ERROR --error --metrics=off \
+                      --exclude node_modules --exclude .next \
+                      /src/api /src/devsecops-portfolio
+                '''
+            }
+        }
+
+        stage('Tests frontend') {
             steps {
                 dir('devsecops-portfolio') {
-                    sh 'npm install'
+                    sh 'npm ci $NPM_FLAGS'
+                    sh 'npm test'
                 }
             }
         }
 
-        stage('Build') {
+        stage('Tests API') {
             steps {
-                dir('devsecops-portfolio') {
-                    sh 'npm run build'
+                dir('api') {
+                    sh 'npm ci $NPM_FLAGS'
+                    sh 'npm test'
                 }
             }
         }
+
+        stage('Audit des dépendances (npm audit)') {
+            steps {
+                dir('api') {
+                    sh 'npm audit --omit=dev --audit-level=critical'
+                }
+                dir('devsecops-portfolio') {
+                    sh 'npm audit --omit=dev --audit-level=critical'
+                }
+            }
+        }
+
+        stage('OWASP Dependency-Check') {
+            options { timeout(time: 60, unit: 'MINUTES') }
+            steps {
+                withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_KEY')]) {
+                    sh '''
+                        mkdir -p odc-report && chmod 777 odc-report
+                        docker run --rm --user root \
+                          -v "$PWD":/src \
+                          -v "$PWD/odc-report":/report \
+                          -v odc-data:/usr/share/dependency-check/data \
+                          owasp/dependency-check:latest \
+                          --scan /src/api/package-lock.json \
+                          --scan /src/devsecops-portfolio/package-lock.json \
+                          --format HTML --format JSON --out /report \
+                          --failOnCVSS 9 \
+                          --nvdApiKey "$NVD_KEY"
+                    '''
+                }
+            }
+        }
+
+        stage('Build images Docker') {
+            steps {
+                sh 'docker build --network=host -t devsecops-api:${GIT_SHA} ./api'
+                sh 'docker build --network=host -t devsecops-portfolio:${GIT_SHA} ./devsecops-portfolio'
+            }
+        }
+
+        stage('Scan des images (Trivy)') {
+            steps {
+                sh '''
+                    mkdir -p trivy-tmp
+                    trap 'rm -rf trivy-tmp' EXIT
+                    for IMG in devsecops-api devsecops-portfolio; do
+                      docker save $IMG:${GIT_SHA} -o trivy-tmp/$IMG.tar
+
+                      docker run --rm \
+                        -v "$PWD/trivy-tmp":/images \
+                        -v trivy-cache:/root/.cache/ \
+                        aquasec/trivy:latest image --input /images/$IMG.tar \
+                        --scanners vuln --no-progress --timeout 15m \
+                        --severity HIGH,CRITICAL --ignore-unfixed --exit-code 0
+
+                      docker run --rm \
+                        -v "$PWD/trivy-tmp":/images \
+                        -v trivy-cache:/root/.cache/ \
+                        aquasec/trivy:latest image --input /images/$IMG.tar \
+                        --scanners vuln --no-progress --timeout 15m \
+                        --severity CRITICAL --ignore-unfixed --exit-code 1
+                    done
+                '''
+            }
+        }
+
+        stage('Images générées') {
+            steps {
+                sh 'docker images | grep -E "REPOSITORY|devsecops" | grep -E "REPOSITORY|${GIT_SHA}"'
+            }
+        }
+    }
+
+    post {
+        always {
+            archiveArtifacts artifacts: 'odc-report/**', allowEmptyArchive: true
+        }
+        success { echo 'Pipeline réussi : aucun secret ni vulnérabilité critique.' }
+        failure { echo 'Pipeline échoué : secret ou vulnérabilité critique détecté, voir le stage rouge.' }
     }
 }
