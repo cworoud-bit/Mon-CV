@@ -26,8 +26,8 @@ jobs:
       run:
         working-directory: ${{ matrix.dir }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
@@ -39,7 +39,7 @@ jobs:
     name: Scan des secrets (Gitleaks)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
       - run: |
@@ -50,7 +50,7 @@ jobs:
     name: SAST (Semgrep)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - run: |
           docker run --rm -v "$PWD":/src semgrep/semgrep:latest \
             semgrep scan --config p/javascript --config p/typescript \
@@ -63,8 +63,8 @@ jobs:
     name: Dépendances (npm audit)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
       - run: npm audit --omit=dev --audit-level=critical
@@ -85,11 +85,11 @@ jobs:
           - image: devsecops-portfolio
             context: ./devsecops-portfolio
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Build
         run: docker build -t ${{ matrix.image }}:${{ github.sha }} ${{ matrix.context }}
       - name: Scan Trivy (échec si CRITICAL)
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@38b337fff0a2f984d5be173c99e3f633438167ec # master au 2026-11-11
         with:
           image-ref: ${{ matrix.image }}:${{ github.sha }}
           scanners: vuln
