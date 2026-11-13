@@ -1,0 +1,4 @@
+BUILD devsecops-api:baseline taille=745Mo build=122s
+BUILD devsecops-portfolio:baseline taille=289Mo build=174s
+SCAN devsecops-api:baseline total=4 CRITICAL=0 HIGH=3 MEDIUM=1 LOW=0
+SCAN devsecops-portfolio:baseline total=54 CRITICAL=0 HIGH=7 MEDIUM=15 LOW=32
