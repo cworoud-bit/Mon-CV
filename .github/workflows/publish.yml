@@ -1,0 +1,46 @@
+name: Publish
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publier et signer (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: devsecops-api
+            context: ./api
+          - image: devsecops-portfolio
+            context: ./devsecops-portfolio
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+      - name: Connexion à ghcr.io
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Construire et publier
+        id: push
+        run: |
+          OWNER=$(echo "${{ github.repository_owner }}" | tr 'A-Z' 'a-z')
+          REF=ghcr.io/$OWNER/${{ matrix.image }}
+          docker build \
+            --label org.opencontainers.image.source=https://github.com/${{ github.repository }} \
+            -t $REF:${{ github.sha }} ${{ matrix.context }}
+          docker push $REF:${{ github.sha }}
+          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' $REF:${{ github.sha }})
+          echo "ref=$DIGEST" >> "$GITHUB_OUTPUT"
+      - name: Signer l'image (Cosign, sans clé)
+        run: cosign sign --yes "${{ steps.push.outputs.ref }}"
