@@ -4,3 +4,9 @@ node_modules/
 *.bak
 *.log
 .vagrant/
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
