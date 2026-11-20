@@ -3,6 +3,7 @@ const cors = require("cors");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const { z } = require("zod");
+const multer = require("multer");
 
 const profile = require("./data/profile");
 const projects = require("./data/projects");
@@ -20,6 +21,16 @@ const contactSchema = z.strictObject({
   name: z.string().trim().min(2).max(80),
   email: z.string().trim().toLowerCase().email().max(120),
   message: z.string().trim().min(10).max(2000),
+});
+
+const ALLOWED_TYPES = ["image/png", "image/jpeg", "application/pdf", "text/plain"];
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 2 * 1024 * 1024, files: 1 },
+  fileFilter: (req, file, cb) =>
+    ALLOWED_TYPES.includes(file.mimetype)
+      ? cb(null, true)
+      : cb(new HttpError(415, "UNSUPPORTED_FILE_TYPE", "Type de fichier non autorisé")),
 });
 
 const tooMany = (req, res) =>
@@ -68,11 +79,33 @@ app.get("/api/profile", (req, res) => res.json(profile));
 app.get("/api/projects", (req, res) => res.json(projects));
 app.get("/api/skills", (req, res) => res.json(skills));
 
-app.post("/api/contact", contactLimiter, async (req, res) => {
-  const data = contactSchema.parse(req.body);
+app.post("/api/contact", contactLimiter, upload.single("attachment"), async (req, res) => {
+  const data = contactSchema.parse({ ...req.body });
   const prisma = require("./db"); // chargé à la demande (facilite les tests)
   const entry = await prisma.contactMessage.create({ data });
-  res.status(201).json({ status: "ok", message: "Message bien reçu", id: entry.id });
+
+  const result = { status: "ok", message: "Message bien reçu", id: entry.id };
+
+  // Floci / AWS : pièce jointe (S3) + notification (SQS).
+  // Actif seulement si AWS_ENDPOINT_URL est défini. Non bloquant : le message est déjà en base.
+  if (process.env.AWS_ENDPOINT_URL) {
+    try {
+      const aws = require("./aws");
+      await aws.ensureResources();
+      if (req.file) result.attachmentKey = await aws.uploadAttachment(req.file);
+      result.notificationId = await aws.notify({
+        id: entry.id,
+        name: data.name,
+        email: data.email,
+        attachmentKey: result.attachmentKey ?? null,
+      });
+    } catch (err) {
+      console.error("AWS (Floci) indisponible :", err.message);
+      result.notification = "failed";
+    }
+  }
+
+  res.status(201).json(result);
 });
 app.use((req, res) => {
   res.status(404).json({
@@ -97,6 +130,14 @@ app.use((err, req, res, next) => {
   }
   if (err.type === "entity.too.large") {
     return res.status(413).json({ status: "error", code: "PAYLOAD_TOO_LARGE", message: "Requête trop volumineuse" });
+  }
+  if (err.name === "MulterError") {
+    const tooBig = err.code === "LIMIT_FILE_SIZE";
+    return res.status(tooBig ? 413 : 400).json({
+      status: "error",
+      code: tooBig ? "FILE_TOO_LARGE" : "INVALID_UPLOAD",
+      message: tooBig ? "Fichier trop volumineux (2 Mo max)" : "Envoi de fichier invalide",
+    });
   }
   if (err instanceof HttpError) {
     return res.status(err.status).json({ status: "error", code: err.code, message: err.message });
