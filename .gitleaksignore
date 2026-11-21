@@ -1,0 +1,2 @@
+# Faux positif : reponse JSON de l API dans le README (cle de piece jointe horodatee et UUID SQS, pas des secrets)
+54a6cd5320a366e8b51aaadc243bfb4100f74239:README-activite6.md:generic-api-key:125
