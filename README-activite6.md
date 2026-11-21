@@ -515,6 +515,59 @@ Dès que le premier terminal termine ou annule l'opération, le verrou disparaî
 
 ![Exécution simultanée bloquée par le verrou](screenshots/128.png)
 
+### 129. Analyse du code Terraform dans le pipeline (Trivy IaC)
+
+Un job `iac` est ajouté au workflow `.github/workflows/ci.yml`. Il analyse le dossier `terraform/` avec Trivy (`trivy config`) et échoue si une misconfiguration de sévérité HIGH ou CRITICAL est trouvée. Le projet d'introduction `basic/` (exercices 118 à 123) et le cache `.terraform` sont exclus du scan.
+
+```yaml
+  iac:
+    name: Scan IaC (Trivy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Analyse du code Terraform (échec si HIGH ou CRITICAL)
+        run: |
+          docker run --rm -v "$PWD/terraform":/tf aquasec/trivy:latest \
+            config /tf --severity HIGH,CRITICAL --exit-code 1 \
+            --skip-dirs "**/.terraform" --skip-dirs "**/basic"
+```
+
+Le premier scan des modules a trouvé des problèmes réels, corrigés dans le code :
+
+| Règle | Problème | Correction |
+|---|---|---|
+| AWS-0086, 0087, 0091, 0093 | Pas de blocage de l'accès public sur le bucket S3 | Ressource `aws_s3_bucket_public_access_block` avec les quatre options à `true` |
+| AWS-0096 | File SQS non chiffrée | `sqs_managed_sse_enabled = true` |
+| AWS-0132 | Bucket non chiffré avec une clé KMS gérée par le client | Exception volontaire et justifiée dans le code (`#trivy:ignore:AVD-AWS-0132`) : le chiffrement SSE-S3 par défaut suffit pour ce TP |
+
+Après correction, le scan retourne `Failures: 0` et le code de sortie 0.
+
+Un faux positif Gitleaks est apparu dans la même CI : la réponse JSON de l'API collée dans ce README (clé de pièce jointe horodatée et identifiant de message SQS) a été prise pour une clé d'API (règle `generic-api-key`). Ce n'est pas un secret. Le résultat est ignoré par son empreinte dans le fichier `.gitleaksignore`, avec un commentaire de justification, sans désactiver le scan.
+
+![Pipeline avec le job Scan IaC (Trivy)](screenshots/129.png)
+
+### 130. Mauvaise configuration volontaire détectée par le pipeline
+
+Sur une branche de test (`test-iac-echec`), trois erreurs sont introduites volontairement dans les modules :
+
+- un bucket S3 en lecture publique (`acl = "public-read"`)
+- le blocage d'accès public désactivé (les quatre options à `false`)
+- la file SQS sans chiffrement (`sqs_managed_sse_enabled = false`)
+
+```hcl
+resource "aws_s3_bucket_acl" "bad" {
+  bucket = aws_s3_bucket.this.id
+  acl    = "public-read"
+}
+```
+
+Résultat : le job `Scan IaC (Trivy)` échoue et fait échouer le pipeline, alors que les autres contrôles (Gitleaks, Semgrep, npm audit, tests, tests d'intégration Floci) restent verts. C'est donc bien l'analyse du code d'infrastructure qui détecte le problème.
+
+![Pipeline échoué à cause du scan IaC](screenshots/130.png)
+![Détail des misconfigurations signalées par Trivy](screenshots/130-trivy-log.png)
+
+La branche de test n'est jamais fusionnée : elle est supprimée après les captures, et la branche `activite-6` garde la configuration saine.
+
 ## Problèmes rencontrés
 
 - Le paquet `awscli` installé par `apt` affichait `badly formed help string` : remplacé par AWS CLI v2 (2.35.x).
