@@ -336,6 +336,185 @@ Terraform supprime les trois ressources qu'il avait créées. Les ressources de 
 
 ![terraform destroy](screenshots/123.png)
 
+## 24. Terraform avancé
+
+### 124. Modules réutilisables
+
+La configuration de l'exercice 121 est transformée en trois modules réutilisables, un par type de ressource. Chaque module reçoit ses paramètres par des variables et expose ses résultats par des sorties.
+
+```
+terraform/
+├── basic/                  # projet de l'exercice 119 à 123
+├── modules/
+│   ├── storage/            # bucket S3
+│   ├── queue/              # file SQS
+│   └── database/           # table DynamoDB
+└── envs/
+    ├── dev/
+    ├── staging/
+    └── prod/
+```
+
+Chaque module contient `main.tf`, `variables.tf` et `outputs.tf`. Exemple, `modules/queue/main.tf` :
+
+```hcl
+resource "aws_sqs_queue" "this" {
+  name                       = var.queue_name
+  visibility_timeout_seconds = var.visibility_timeout_seconds
+  message_retention_seconds  = var.message_retention_seconds
+
+  tags = {
+    Environment = var.environment
+    ManagedBy   = "terraform"
+  }
+}
+```
+
+![Arborescence et validation des modules](screenshots/124.png)
+
+### 125. Configurations séparées : dev, staging et prod
+
+Chaque environnement est un projet Terraform indépendant dans `envs/<env>/`, avec son propre état. Il appelle les mêmes modules, et seul le fichier `terraform.tfvars` change.
+
+`envs/dev/main.tf` (identique pour les trois environnements) :
+
+```hcl
+module "storage" {
+  source = "../../modules/storage"
+
+  bucket_name = "${var.project}-${var.environment}-bucket"
+  environment = var.environment
+}
+
+module "queue" {
+  source = "../../modules/queue"
+
+  queue_name                 = "${var.project}-${var.environment}-queue"
+  environment                = var.environment
+  visibility_timeout_seconds = var.queue_visibility_timeout
+  message_retention_seconds  = var.queue_retention_seconds
+}
+
+module "database" {
+  source = "../../modules/database"
+
+  table_name  = "${var.project}-${var.environment}-table"
+  environment = var.environment
+}
+```
+
+Valeurs propres à chaque environnement :
+
+| Environnement | `environment` | Timeout de visibilité SQS | Conservation des messages SQS |
+|---|---|---|---|
+| dev | `dev` | 30 s | 1 jour |
+| staging | `staging` | 60 s | 4 jours |
+| prod | `prod` | 120 s | 14 jours |
+
+Les ressources sont nommées avec l'environnement (`portfolio-dev-bucket`, `portfolio-staging-queue`, `portfolio-prod-table`), ce qui permet de les déployer côte à côte dans Floci.
+
+```bash
+cd terraform/envs/dev
+terraform init
+terraform plan
+terraform apply
+```
+
+![Déploiement de l'environnement dev](screenshots/125.png)
+
+### 126. Le rôle du fichier Terraform State
+
+Le fichier d'état (`terraform.tfstate`) est la mémoire de Terraform. Il fait le lien entre les ressources décrites dans le code et les ressources réellement créées : identifiants, ARN et attributs de chaque ressource.
+
+À chaque `terraform plan`, Terraform compare trois choses : le code, l'état et l'infrastructure réelle. C'est cette comparaison qui lui permet de savoir ce qu'il doit créer, modifier ou détruire. Sans état, il ne saurait pas que le bucket existe déjà et chercherait à le recréer.
+
+Deux points importants :
+
+- Le fichier peut contenir des informations sensibles en clair. Il ne doit donc pas être versionné dans Git (il est dans le `.gitignore`).
+- En local, il n'est pas partageable et pas protégé contre deux exécutions simultanées. C'est pourquoi on le stocke dans un backend distant avec verrouillage (exercices 127 et 128).
+
+### 127. Backend distant S3 hébergé dans Floci
+
+Le state de chaque environnement est stocké dans un bucket S3 de Floci, avec une clé par environnement (`dev/terraform.tfstate`, `staging/terraform.tfstate`, `prod/terraform.tfstate`).
+
+```bash
+awsl s3 mb s3://tfstate-portfolio
+```
+
+`envs/dev/backend.tf` :
+
+```hcl
+terraform {
+  backend "s3" {
+    bucket = "tfstate-portfolio"
+    key    = "dev/terraform.tfstate"
+    region = "us-east-1"
+
+    endpoints = {
+      s3  = "http://localhost:4566"
+      sts = "http://localhost:4566"
+    }
+
+    # Identifiants fictifs : Floci n'a pas besoin de vrais identifiants
+    access_key = "test"
+    secret_key = "test"
+
+    use_path_style              = true
+    skip_credentials_validation = true
+    skip_metadata_api_check     = true
+    skip_requesting_account_id  = true
+    skip_region_validation      = true
+
+    # Verrouillage du state (128)
+    use_lockfile = true
+  }
+}
+```
+
+Le state local de `dev` est migré vers le backend distant :
+
+```bash
+cd terraform/envs/dev
+terraform init -migrate-state
+awsl s3 ls s3://tfstate-portfolio --recursive
+terraform plan
+```
+
+Le `terraform plan` qui suit la migration indique `No changes` : les ressources existantes sont bien retrouvées dans le state distant.
+
+![Migration du state vers S3](screenshots/127.png)
+
+### 128. Verrouillage du state
+
+L'option `use_lockfile = true` active le verrouillage natif du backend S3 : pendant une opération, Terraform dépose un fichier `terraform.tfstate.tflock` à côté du state, avec une écriture conditionnelle. Si le fichier existe déjà, la seconde exécution est refusée.
+
+Test : un premier terminal lance `terraform apply` et reste en attente de confirmation (le verrou est alors pris). Un second terminal lance `terraform plan` sur le même environnement :
+
+```
+Error: Error acquiring the state lock
+
+Error message: operation error S3: PutObject, https response error StatusCode: 412 ...
+PreconditionFailed: At least one of the pre-conditions you specified did not hold
+Lock Info:
+  Path:      tfstate-portfolio/dev/terraform.tfstate
+  Operation: OperationTypeApply
+```
+
+Le fichier de verrou est visible dans le bucket :
+
+```bash
+awsl s3 ls s3://tfstate-portfolio/dev/
+```
+
+```
+terraform.tfstate
+terraform.tfstate.tflock
+```
+
+Dès que le premier terminal termine ou annule l'opération, le verrou disparaît et le `terraform plan` suivant fonctionne.
+
+![Exécution simultanée bloquée par le verrou](screenshots/128.png)
+
 ## Problèmes rencontrés
 
 - Le paquet `awscli` installé par `apt` affichait `badly formed help string` : remplacé par AWS CLI v2 (2.35.x).
