@@ -142,3 +142,14 @@ jobs:
           echo "Floci ne répond pas" && exit 1
       - name: Tests d'intégration Floci (sans compte AWS)
         run: node --test tests/integration/floci.integration.js
+
+  iac:
+    name: Scan IaC (Trivy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Analyse du code Terraform (échec si HIGH ou CRITICAL)
+        run: |
+          docker run --rm -v "$PWD/terraform":/tf aquasec/trivy:latest \
+            config /tf --severity HIGH,CRITICAL --exit-code 1 \
+            --skip-dirs "**/.terraform" --skip-dirs "**/basic"
