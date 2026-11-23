@@ -568,6 +568,99 @@ Résultat : le job `Scan IaC (Trivy)` échoue et fait échouer le pipeline, alor
 
 La branche de test n'est jamais fusionnée : elle est supprimée après les captures, et la branche `activite-6` garde la configuration saine.
 
+### 129. Analyse du code Terraform dans le pipeline (Trivy IaC)
+
+Un job `iac` est ajouté au workflow `.github/workflows/ci.yml`. Il analyse le dossier `terraform/` avec Trivy (`trivy config`) et échoue si une misconfiguration de sévérité HIGH ou CRITICAL est trouvée. Le projet d'introduction `basic/` (exercices 118 à 123) et le cache `.terraform` sont exclus du scan.
+
+```yaml
+  iac:
+    name: Scan IaC (Trivy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Analyse du code Terraform (échec si HIGH ou CRITICAL)
+        run: |
+          docker run --rm -v "$PWD/terraform":/tf aquasec/trivy:latest \
+            config /tf --severity HIGH,CRITICAL --exit-code 1 \
+            --skip-dirs "**/.terraform" --skip-dirs "**/basic"
+```
+
+Le premier scan des modules a trouvé des problèmes réels, corrigés dans le code :
+
+| Règle | Problème | Correction |
+|---|---|---|
+| AWS-0086, 0087, 0091, 0093 | Pas de blocage de l'accès public sur le bucket S3 | Ressource `aws_s3_bucket_public_access_block` avec les quatre options à `true` |
+| AWS-0096 | File SQS non chiffrée | `sqs_managed_sse_enabled = true` |
+| AWS-0132 | Bucket non chiffré avec une clé KMS gérée par le client | Exception volontaire et justifiée dans le code (`#trivy:ignore:AVD-AWS-0132`) : le chiffrement SSE-S3 par défaut suffit pour ce TP |
+
+Après correction, le scan retourne `Failures: 0` et le code de sortie 0.
+
+Un faux positif Gitleaks est apparu dans la même CI : la réponse JSON de l'API collée dans ce README (clé de pièce jointe horodatée et identifiant de message SQS) a été prise pour une clé d'API (règle `generic-api-key`). Ce n'est pas un secret. Le résultat est ignoré par son empreinte dans le fichier `.gitleaksignore`, avec un commentaire de justification, sans désactiver le scan.
+
+![Pipeline avec le job Scan IaC (Trivy)](screenshots/129.png)
+
+### 130. Mauvaise configuration volontaire détectée par le pipeline
+
+Sur une branche de test (`test-iac-echec`), trois erreurs sont introduites volontairement dans les modules :
+
+- un bucket S3 en lecture publique (`acl = "public-read"`)
+- le blocage d'accès public désactivé (les quatre options à `false`)
+- la file SQS sans chiffrement (`sqs_managed_sse_enabled = false`)
+
+```hcl
+resource "aws_s3_bucket_acl" "bad" {
+  bucket = aws_s3_bucket.this.id
+  acl    = "public-read"
+}
+```
+
+Résultat : le job `Scan IaC (Trivy)` échoue et fait échouer le pipeline, alors que les autres contrôles (Gitleaks, Semgrep, npm audit, tests, tests d'intégration Floci) restent verts. C'est donc bien l'analyse du code d'infrastructure qui détecte le problème.
+
+![Pipeline échoué à cause du scan IaC](screenshots/130.png)
+![Détail des misconfigurations signalées par Trivy](screenshots/130-trivy-log.png)
+
+La branche de test n'est jamais fusionnée : elle est supprimée après les captures, et la branche `activite-6` garde la configuration saine.
+
+### 131. Test d'OpenTofu avec la même infrastructure
+
+OpenTofu est installé avec snap, puis exécuté sur exactement le même code HCL que Terraform (mêmes modules, même environnement `dev`).
+
+```bash
+sudo snap install opentofu --classic
+tofu version
+```
+
+Le projet est copié dans `opentofu/` (modules et environnement `dev`, sans le fichier `backend.tf`, donc avec un state local). La variable `project` est passée en ligne de commande pour que les ressources s'appellent `tofu-dev-...` et ne rentrent pas en conflit avec celles de Terraform (`portfolio-dev-...`) :
+
+```bash
+cd opentofu/envs/dev
+tofu init
+tofu validate
+tofu plan -var="project=tofu"
+tofu apply -var="project=tofu"
+```
+
+Résultat : `Apply complete! Resources: 4 added, 0 changed, 0 destroyed.` (bucket S3, blocage d'accès public, file SQS et table DynamoDB). Les ressources sont visibles dans Floci à côté de celles créées par Terraform.
+
+![OpenTofu : version et apply](screenshots/131.png)
+![Vérification dans Floci](screenshots/131-verification.png)
+
+**Difficulté rencontrée :** OpenTofu télécharge ses providers depuis son propre registre (`registry.opentofu.org`) et n'utilise pas le cache de Terraform. Le provider AWS pèse plusieurs centaines de Mo et la connexion de la VM est lente. La solution a été de configurer un miroir local dans `~/.tofurc` (`filesystem_mirror`) pointant vers le provider déjà téléchargé par Terraform : `tofu init` s'exécute alors en quelques secondes, sans téléchargement.
+
+**Comparaison avec Terraform :**
+
+| Critère | Terraform | OpenTofu |
+|---|---|---|
+| Commande | `terraform` | `tofu` |
+| Licence | BUSL (source disponible, usage commercial restreint) | MPL-2.0, open source (Linux Foundation) |
+| Code HCL | Référence | Identique, aucune modification nécessaire |
+| Registre de providers | `registry.terraform.io` | `registry.opentofu.org` |
+| Fichiers générés | `.terraform/`, `.terraform.lock.hcl`, `terraform.tfstate` | Mêmes fichiers, même format de state |
+| Résultat sur Floci | 4 ressources créées | 4 ressources créées, comportement identique |
+| Fonctionnalité propre | | Chiffrement natif du state |
+
+**Conclusion :** pour ce projet, OpenTofu est un remplaçant direct de Terraform : même code, même résultat. Le choix se fait donc surtout sur la licence et la gouvernance du projet.
+
 ## Problèmes rencontrés
 
 - Le paquet `awscli` installé par `apt` affichait `badly formed help string` : remplacé par AWS CLI v2 (2.35.x).
