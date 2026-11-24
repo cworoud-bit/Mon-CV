@@ -11,9 +11,5 @@ node_modules/
 *.tfstate.*
 crash.log
 .terraform/
-*.tfstate
-*.tfstate.*
 automation/ansible/inventory.ini
 .terragrunt-cache/
-.terraform/
-node_modules/
