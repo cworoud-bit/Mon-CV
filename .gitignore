@@ -4,3 +4,16 @@ node_modules/
 *.bak
 *.log
 .vagrant/
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+.terraform/
+*.tfstate
+*.tfstate.*
+automation/ansible/inventory.ini
+.terragrunt-cache/
+.terraform/
+node_modules/

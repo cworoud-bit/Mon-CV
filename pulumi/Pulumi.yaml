@@ -1,0 +1,3 @@
+name: floci-pulumi
+description: Ressources Floci (S3 et SQS) décrites en TypeScript avec Pulumi
+runtime: nodejs

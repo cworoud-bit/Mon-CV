@@ -75,7 +75,7 @@ jobs:
   images:
     name: Build et scan des images (${{ matrix.image }})
     runs-on: ubuntu-latest
-    needs: [tests, secrets, sast, dependencies]
+    needs: [tests, secrets, sast, dependencies, iac]
     strategy:
       fail-fast: false
       matrix:
@@ -108,3 +108,48 @@ jobs:
           severity: CRITICAL
           ignore-unfixed: true
           exit-code: "1"
+
+  integration:
+    name: Tests d'intégration (Floci)
+    runs-on: ubuntu-latest
+    services:
+      floci:
+        image: floci/floci
+        ports:
+          - 4566:4566
+    env:
+      AWS_ENDPOINT_URL: http://localhost:4566
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_REGION: us-east-1
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+      - run: npm ci
+      - name: Attendre Floci
+        run: |
+          for i in $(seq 1 30); do
+            curl -s http://localhost:4566/ > /dev/null && exit 0
+            sleep 2
+          done
+          echo "Floci ne répond pas" && exit 1
+      - name: Tests d'intégration Floci (sans compte AWS)
+        run: node --test tests/integration/floci.integration.js
+
+  iac:
+    name: Scan IaC (Trivy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Analyse du code Terraform (échec si HIGH ou CRITICAL)
+        run: |
+          docker run --rm -v "$PWD/terraform":/tf aquasec/trivy:latest \
+            config /tf --severity HIGH,CRITICAL --exit-code 1 \
+            --skip-dirs "**/.terraform" --skip-dirs "**/basic"

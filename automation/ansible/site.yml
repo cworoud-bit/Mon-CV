@@ -1,0 +1,54 @@
+---
+- name: Configurer le serveur avec les valeurs créées par Terraform
+  hosts: servers
+  become: true
+  tasks:
+    - name: Vérifier que Docker est installé
+      ansible.builtin.command: docker --version
+      register: docker_check
+      changed_when: false
+      failed_when: false
+
+    - name: Arrêter si Docker est absent
+      ansible.builtin.fail:
+        msg: "Docker n'est pas installé : lancer d'abord ansible/install-docker.yml"
+      when: docker_check.rc != 0
+
+    - name: Installer le SDK Python de Docker (nécessaire aux modules Ansible)
+      ansible.builtin.apt:
+        name: python3-docker
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Créer le dossier de l'application
+      ansible.builtin.file:
+        path: /opt/demo-app
+        state: directory
+        mode: "0755"
+
+    - name: Générer la page avec les valeurs fournies par Terraform
+      ansible.builtin.template:
+        src: index.html.j2
+        dest: /opt/demo-app/index.html
+        mode: "0644"
+
+    - name: Lancer le conteneur nginx
+      community.docker.docker_container:
+        name: demo-app
+        image: nginx:alpine
+        state: started
+        restart_policy: unless-stopped
+        published_ports:
+          - "8088:80"
+        volumes:
+          - /opt/demo-app/index.html:/usr/share/nginx/html/index.html:ro
+
+    - name: Vérifier que l'application répond
+      ansible.builtin.uri:
+        url: http://localhost:8088
+        return_content: true
+      register: page
+      until: page.status == 200
+      retries: 10
+      delay: 3

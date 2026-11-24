@@ -25,6 +25,19 @@ services:
       retries: 10
     restart: unless-stopped
 
+  floci:
+    image: floci/floci
+    container_name: floci
+    ports:
+      - "4566:4566"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - floci-data:/app/data
+    environment:
+      - FLOCI_STORAGE_MODE=persistent
+      - FLOCI_STORAGE_PERSISTENT_PATH=/app/data
+    restart: unless-stopped
+
   api:
     build: ./api
     image: devsecops-api
@@ -32,11 +45,17 @@ services:
     environment:
       - PORT=4000
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      - AWS_ENDPOINT_URL=http://floci:4566
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_REGION=us-east-1
     ports:
       - "4000:4000"
     depends_on:
       postgres:
         condition: service_healthy
+      floci:
+        condition: service_started
     restart: unless-stopped
 
   frontend:
@@ -53,3 +72,4 @@ services:
 
 volumes:
   pgdata:
+  floci-data:
