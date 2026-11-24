@@ -1,0 +1,14 @@
+---
+- name: Supprimer l'application du serveur
+  hosts: servers
+  become: true
+  tasks:
+    - name: Supprimer le conteneur
+      community.docker.docker_container:
+        name: demo-app
+        state: absent
+
+    - name: Supprimer les fichiers de l'application
+      ansible.builtin.file:
+        path: /opt/demo-app
+        state: absent
