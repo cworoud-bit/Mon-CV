@@ -13,3 +13,4 @@ crash.log
 .terraform/
 *.tfstate
 *.tfstate.*
+automation/ansible/inventory.ini

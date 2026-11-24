@@ -568,59 +568,6 @@ Résultat : le job `Scan IaC (Trivy)` échoue et fait échouer le pipeline, alor
 
 La branche de test n'est jamais fusionnée : elle est supprimée après les captures, et la branche `activite-6` garde la configuration saine.
 
-### 129. Analyse du code Terraform dans le pipeline (Trivy IaC)
-
-Un job `iac` est ajouté au workflow `.github/workflows/ci.yml`. Il analyse le dossier `terraform/` avec Trivy (`trivy config`) et échoue si une misconfiguration de sévérité HIGH ou CRITICAL est trouvée. Le projet d'introduction `basic/` (exercices 118 à 123) et le cache `.terraform` sont exclus du scan.
-
-```yaml
-  iac:
-    name: Scan IaC (Trivy)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - name: Analyse du code Terraform (échec si HIGH ou CRITICAL)
-        run: |
-          docker run --rm -v "$PWD/terraform":/tf aquasec/trivy:latest \
-            config /tf --severity HIGH,CRITICAL --exit-code 1 \
-            --skip-dirs "**/.terraform" --skip-dirs "**/basic"
-```
-
-Le premier scan des modules a trouvé des problèmes réels, corrigés dans le code :
-
-| Règle | Problème | Correction |
-|---|---|---|
-| AWS-0086, 0087, 0091, 0093 | Pas de blocage de l'accès public sur le bucket S3 | Ressource `aws_s3_bucket_public_access_block` avec les quatre options à `true` |
-| AWS-0096 | File SQS non chiffrée | `sqs_managed_sse_enabled = true` |
-| AWS-0132 | Bucket non chiffré avec une clé KMS gérée par le client | Exception volontaire et justifiée dans le code (`#trivy:ignore:AVD-AWS-0132`) : le chiffrement SSE-S3 par défaut suffit pour ce TP |
-
-Après correction, le scan retourne `Failures: 0` et le code de sortie 0.
-
-Un faux positif Gitleaks est apparu dans la même CI : la réponse JSON de l'API collée dans ce README (clé de pièce jointe horodatée et identifiant de message SQS) a été prise pour une clé d'API (règle `generic-api-key`). Ce n'est pas un secret. Le résultat est ignoré par son empreinte dans le fichier `.gitleaksignore`, avec un commentaire de justification, sans désactiver le scan.
-
-![Pipeline avec le job Scan IaC (Trivy)](screenshots/129.png)
-
-### 130. Mauvaise configuration volontaire détectée par le pipeline
-
-Sur une branche de test (`test-iac-echec`), trois erreurs sont introduites volontairement dans les modules :
-
-- un bucket S3 en lecture publique (`acl = "public-read"`)
-- le blocage d'accès public désactivé (les quatre options à `false`)
-- la file SQS sans chiffrement (`sqs_managed_sse_enabled = false`)
-
-```hcl
-resource "aws_s3_bucket_acl" "bad" {
-  bucket = aws_s3_bucket.this.id
-  acl    = "public-read"
-}
-```
-
-Résultat : le job `Scan IaC (Trivy)` échoue et fait échouer le pipeline, alors que les autres contrôles (Gitleaks, Semgrep, npm audit, tests, tests d'intégration Floci) restent verts. C'est donc bien l'analyse du code d'infrastructure qui détecte le problème.
-
-![Pipeline échoué à cause du scan IaC](screenshots/130.png)
-![Détail des misconfigurations signalées par Trivy](screenshots/130-trivy-log.png)
-
-La branche de test n'est jamais fusionnée : elle est supprimée après les captures, et la branche `activite-6` garde la configuration saine.
-
 ### 131. Test d'OpenTofu avec la même infrastructure
 
 OpenTofu est installé avec snap, puis exécuté sur exactement le même code HCL que Terraform (mêmes modules, même environnement `dev`).
@@ -660,6 +607,257 @@ Résultat : `Apply complete! Resources: 4 added, 0 changed, 0 destroyed.` (bucke
 | Fonctionnalité propre | | Chiffrement natif du state |
 
 **Conclusion :** pour ce projet, OpenTofu est un remplaçant direct de Terraform : même code, même résultat. Le choix se fait donc surtout sur la licence et la gouvernance du projet.
+
+### 132. Terragrunt : factoriser les configurations dev, staging et prod
+
+Avec Terraform seul, chaque environnement (`envs/dev`, `envs/staging`, `envs/prod`) contient les mêmes fichiers recopiés : `providers.tf`, `backend.tf`, `variables.tf`, `main.tf` et `outputs.tf`. Terragrunt permet de les écrire une seule fois.
+
+```
+terragrunt/
+├── root.hcl               # provider et backend générés pour tous les environnements
+├── stack/                 # code Terraform commun (main.tf, variables.tf, outputs.tf)
+├── modules/               # modules storage, queue et database
+├── dev/terragrunt.hcl     # uniquement les valeurs propres à dev
+├── staging/terragrunt.hcl
+└── prod/terragrunt.hcl
+```
+
+`root.hcl` génère le provider et le backend S3 de Floci dans chaque environnement. La clé du state dépend du dossier de l'environnement :
+
+```hcl
+generate "backend" {
+  path      = "backend.tf"
+  if_exists = "overwrite_terragrunt"
+  contents  = <<BACKEND
+terraform {
+  backend "s3" {
+    bucket = "tfstate-portfolio"
+    key    = "terragrunt/${path_relative_to_include()}/terraform.tfstate"
+    ...
+  }
+}
+BACKEND
+}
+
+inputs = {
+  project = "tg"
+}
+```
+
+Chaque environnement se résume à un petit fichier. Exemple, `dev/terragrunt.hcl` :
+
+```hcl
+include "root" {
+  path = find_in_parent_folders("root.hcl")
+}
+
+terraform {
+  source = "${get_parent_terragrunt_dir()}//stack"
+}
+
+inputs = {
+  environment              = "dev"
+  queue_visibility_timeout = 30
+  queue_retention_seconds  = 86400
+}
+```
+
+Installation (le binaire a été téléchargé depuis Windows puis copié sur la VM, car le réseau de la VM est très lent) :
+
+```bash
+sudo install -m 0755 /tmp/terragrunt /usr/local/bin/terragrunt
+terragrunt --version
+```
+
+![terragrunt --version](screenshots/132-version.png)
+
+Plan de l'environnement `dev`, puis application sur les trois environnements en une seule commande :
+
+```bash
+cd terragrunt/dev
+terragrunt plan
+
+cd ..
+terragrunt run --all plan
+terragrunt run --all apply
+```
+
+![terragrunt plan sur dev](screenshots/132-plan.png)
+![terragrunt run --all apply](screenshots/132-apply.png)
+
+Résultat : `Succeeded 3` (dev, staging, prod). Chaque environnement a ses propres ressources (`tg-dev-...`, `tg-staging-...`, `tg-prod-...`) et son propre state dans le bucket `tfstate-portfolio` (`terragrunt/dev/terraform.tfstate`, `terragrunt/staging/terraform.tfstate`, `terragrunt/prod/terraform.tfstate`).
+
+![Ressources et states dans Floci](screenshots/132-verification.png)
+
+**Bilan de la factorisation :**
+
+| | Terraform seul | Terragrunt |
+|---|---|---|
+| Lignes pour 3 environnements | environ 399 (133 par environnement) | 191 au total |
+| Fichiers répétés par environnement | 6 | 1 (`terragrunt.hcl`, 13 lignes) |
+| Ajouter un environnement | copier tout le dossier (133 lignes) | créer un `terragrunt.hcl` de 13 lignes |
+| Changer le provider ou le backend | modifier 3 fois | modifier `root.hcl` une seule fois |
+
+**Difficulté rencontrée :** le premier `terragrunt plan` a mis environ 6 minutes, car chaque dossier de travail télécharge le provider AWS (plusieurs centaines de Mo) sur un réseau lent. Le fichier `.terraform.lock.hcl` de `dev` a donc été copié dans `staging` et `prod`.
+
+### 133. Découverte de Pulumi (TypeScript) sur Floci
+
+Pulumi décrit l'infrastructure avec un vrai langage de programmation. Ici, un bucket S3 et une file SQS sont créés dans Floci avec TypeScript.
+
+```
+pulumi/
+├── Pulumi.yaml       # projet (runtime Node.js)
+├── Pulumi.dev.yaml   # stack "dev"
+├── package.json
+├── tsconfig.json
+└── index.ts          # l'infrastructure, en TypeScript
+```
+
+`index.ts` :
+
+```ts
+import * as aws from "@pulumi/aws";
+
+const endpoint = "http://localhost:4566";
+
+// Provider AWS pointé sur Floci, avec des identifiants fictifs
+const floci = new aws.Provider("floci", {
+  region: "us-east-1",
+  accessKey: "test",
+  secretKey: "test",
+  skipCredentialsValidation: true,
+  skipMetadataApiCheck: true,
+  skipRequestingAccountId: true,
+  s3UsePathStyle: true,
+  endpoints: [{ s3: endpoint, sqs: endpoint, sts: endpoint, iam: endpoint }],
+});
+
+const bucket = new aws.s3.BucketV2(
+  "demo-bucket",
+  { bucket: "pulumi-demo-bucket" },
+  { provider: floci }
+);
+
+const queue = new aws.sqs.Queue(
+  "demo-queue",
+  { name: "pulumi-demo-queue" },
+  { provider: floci }
+);
+
+export const bucketName = bucket.bucket;
+export const queueUrl = queue.url;
+```
+
+Installation et utilisation (l'état est stocké localement, sans compte Pulumi Cloud) :
+
+```bash
+pulumi version
+pulumi login --local
+pulumi stack init dev
+pulumi install
+pulumi preview
+pulumi up --yes
+```
+
+![pulumi version](screenshots/133-version.png)
+![pulumi preview](screenshots/133-preview.png)
+![pulumi up](screenshots/133-up.png)
+
+Résultat : `Resources: + 4 created` en 27 secondes (le stack, le provider, le bucket et la file). Les ressources sont visibles dans Floci :
+
+![Vérification dans Floci](screenshots/133-verification.png)
+
+**Comparaison Terraform, OpenTofu et Pulumi :**
+
+| Critère | Terraform | OpenTofu | Pulumi |
+|---|---|---|---|
+| Langage | HCL (déclaratif) | HCL, identique à Terraform | TypeScript, Python, Go... (langage de programmation) |
+| Commandes | `terraform plan` / `apply` | `tofu plan` / `apply` | `pulumi preview` / `up` |
+| Licence | BUSL | MPL-2.0 | Open source (Apache 2.0) |
+| State | Local ou backend distant (S3 de Floci avec verrouillage) | Même format que Terraform | Backend local (`pulumi login --local`) ou Pulumi Cloud, avec phrase secrète |
+| Réutilisation du code | Modules | Modules (compatibles Terraform) | Fonctions, classes et paquets npm |
+| Courbe d'apprentissage | Faible pour de la config simple | Identique à Terraform | Plus facile pour un développeur, plus lourd à installer |
+| Résultat sur Floci | Ressources créées | Ressources créées, comportement identique | Ressources créées |
+
+**Difficultés rencontrées :** Pulumi nécessite plus de téléchargements que Terraform : le CLI (environ 100 Mo, téléchargé depuis Windows puis copié sur la VM à cause du réseau lent), les paquets npm et le provider AWS (environ 750 Mo une fois décompressé). Le provider doit aussi être configuré explicitement avec les endpoints de Floci (`endpoints`, `s3UsePathStyle`).
+
+**Conclusion :** pour une infrastructure simple et déclarative, Terraform ou OpenTofu restent plus légers. Pulumi est plus intéressant quand on veut de vraies boucles, des conditions ou des fonctions, ou réutiliser les compétences d'un développeur.
+
+
+### 134. Terraform puis Ansible : création de l'infrastructure et configuration du serveur
+
+Terraform crée les ressources dans Floci et expose le serveur cible dans ses sorties. Un script génère l'inventaire Ansible à partir de ces sorties, puis Ansible configure le serveur (`worker2`, VM VMware, Docker déjà installé à l'activité 3).
+
+```mermaid
+flowchart LR
+  TF["Terraform<br/>S3 + DynamoDB"] -->|"apply"| FL[("Floci<br/>localhost:4566")]
+  TF -->|"outputs : bucket, table, IP"| SH["deploy.sh<br/>génère inventory.ini"]
+  SH --> AN["Ansible<br/>site.yml"]
+  AN -->|"SSH"| W2["worker2 (VMware)<br/>Docker + nginx :8088"]
+```
+
+```
+automation/
+├── terraform/        # providers.tf, main.tf, variables.tf, outputs.tf
+├── ansible/
+│   ├── site.yml      # configuration du serveur
+│   ├── destroy.yml   # suppression de l'application
+│   └── templates/index.html.j2
+├── deploy.sh         # Terraform -> inventaire -> Ansible
+└── destroy.sh        # Ansible (suppression) -> Terraform destroy
+```
+
+Terraform crée un bucket S3 (avec blocage d'accès public) et une table DynamoDB, puis publie `bucket_name`, `table_name`, `worker_ip` et `worker_user`. `deploy.sh` écrit l'inventaire à partir de ces sorties :
+
+```bash
+WORKER_IP=$(terraform -chdir=terraform output -raw worker_ip)
+cat > ansible/inventory.ini <<INV
+[servers]
+worker2 ansible_host=${WORKER_IP} ansible_user=${WORKER_USER}
+INV
+ansible-playbook -i ansible/inventory.ini ansible/site.yml \
+  -e bucket_name="$(terraform -chdir=terraform output -raw bucket_name)" \
+  -e table_name="$(terraform -chdir=terraform output -raw table_name)"
+```
+
+`site.yml` vérifie Docker, installe le SDK Python de Docker, génère une page à partir des valeurs de Terraform (modèle Jinja2), lance un conteneur `nginx:alpine` sur le port 8088 et teste que la page répond.
+
+```bash
+cd ~/mon-cv/automation
+time ./deploy.sh
+curl http://192.168.220.169:8088
+```
+
+![deploy.sh : Terraform puis Ansible](screenshots/134-deploy.png)
+
+Résultat : Terraform `3 added`, Ansible `ok=7 changed=4 failed=0`. La page affiche le bucket `auto-demo-bucket` et la table `auto-demo-table` créés par Terraform :
+
+![Page servie par worker2](screenshots/134-page.png)
+
+**Prérequis sur le serveur :** accès SSH par clé pour `wrida` et `sudo` sans mot de passe (`/etc/sudoers.d/wrida`), pour que l'automatisation ne demande aucune saisie.
+
+### 135. Suppression complète puis reconstruction par les scripts
+
+```bash
+time ./destroy.sh                       # Ansible supprime l'application, Terraform détruit l'infrastructure
+curl -m 3 http://192.168.220.169:8088   # l'application ne répond plus
+aws --profile floci --endpoint-url http://localhost:4566 s3 ls   # le bucket auto-demo-bucket a disparu
+time ./deploy.sh                        # reconstruction
+curl http://192.168.220.169:8088
+```
+
+![Suppression](screenshots/135-destroy.png)
+![Reconstruction](screenshots/135-rebuild.png)
+
+| Étape | Commande | Résultat | Durée |
+|---|---|---|---|
+| Première construction | `./deploy.sh` | 3 ressources, `ok=7 changed=4` | 2 min 1 s (installation de `python3-docker` et téléchargement de `nginx:alpine`) |
+| Suppression | `./destroy.sh` | conteneur et fichiers supprimés, `3 destroyed`, `Connection refused` sur :8088 | 11,4 s |
+| Reconstruction | `./deploy.sh` | 3 ressources, `ok=7 changed=3`, page identique | 14,8 s |
+
+L'environnement est reconstruit uniquement avec les scripts, en environ 15 secondes, sans aucune intervention manuelle. La reconstruction est plus rapide que la première construction, car le paquet Python et l'image nginx étaient déjà présents sur le serveur.
+
+**Difficultés rencontrées :** le premier `terraform init` retéléchargeait le provider AWS (plusieurs centaines de Mo) sur un réseau lent. La solution a été de réutiliser le cache de plugins (`TF_PLUGIN_CACHE_DIR`) et le fichier `.terraform.lock.hcl`. Ansible a aussi échoué une première fois avec `Missing sudo password` : le sudo sans mot de passe sur le serveur est nécessaire pour une automatisation complète.
 
 ## Problèmes rencontrés
 

@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <title>Terraform + Ansible</title>
+  <style>
+    body { font-family: monospace; background: #0d1117; color: #c9d1d9; padding: 2rem; }
+    h1 { color: #58a6ff; }
+    td { padding: .3rem 1rem .3rem 0; }
+  </style>
+</head>
+<body>
+  <h1>Infrastructure créée par Terraform, serveur configuré par Ansible</h1>
+  <table>
+    <tr><td>Serveur</td><td>{{ ansible_hostname }}</td></tr>
+    <tr><td>Bucket S3 (Floci)</td><td>{{ bucket_name }}</td></tr>
+    <tr><td>Table DynamoDB (Floci)</td><td>{{ table_name }}</td></tr>
+  </table>
+</body>
+</html>
