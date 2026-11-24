@@ -14,3 +14,6 @@ crash.log
 *.tfstate
 *.tfstate.*
 automation/ansible/inventory.ini
+.terragrunt-cache/
+.terraform/
+node_modules/
